@@ -1,0 +1,9 @@
+# Dependencias del notebook de referencia (notebook/Inversión MonteCarlo.ipynb).
+# Incluye todo lo de la app + extras de análisis/plotting. NO instalar en el servidor.
+-r requirements.txt
+jupyter>=1.0.0
+ipykernel>=6.29.0
+matplotlib>=3.7.0
+seaborn>=0.13.0
+tqdm>=4.66.0
+pyarrow>=14.0.0
