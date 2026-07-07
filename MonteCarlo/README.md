@@ -77,7 +77,7 @@ Solo penaliza retornos **por debajo de Rf** (downside deviation). La volatilidad
 | Tipo de retorno | Simple `(Pt−Pt-1)/Pt-1` — linealmente agregable entre activos (`R_p = Σ wᵢRᵢ`, exacto) |
 | Anualización (retorno) | Geométrica: `(1+μ_d)^h − 1` — captura el efecto compounding, más precisa que `μ_d × h` para h > 20 |
 | Anualización (riesgo) | `σ_d × √h` — regla de la raíz del tiempo, asume retornos i.i.d. |
-| Ordenación de tickers | **Mediana trimestral** (retornos de ~12 períodos reales) — más robusta que la media con distribuciones fat-tailed |
+| Ordenación de tickers | **Mediana trimestral** (~11 trimestres completos en 3 años; se excluyen los parciales de los extremos de la ventana y los pre-IPO, que comprimen la mediana hacia 0) — más robusta que la media con distribuciones fat-tailed |
 | Horizontes | Trimestral (63d) y Anual (252d) |
 | Rf | T-Bill 3M USA (`^IRX`) — dinámica, descargada al inicio de cada sesión |
 | Pesos mínimos | 2% por activo |
