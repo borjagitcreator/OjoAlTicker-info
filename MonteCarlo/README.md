@@ -8,22 +8,22 @@ Puedes usarlo de forma completamente independiente: no necesitas la app, solo Py
 
 ## Qué hace
 
-1. **Descarga** los ~503 componentes actuales del S&P 500 (Wikipedia, dinámica) y 3 años de precios ajustados por dividendos y splits (yfinance).
+1. **Descarga** los ~503 componentes actuales del S&P 500 (Wikipedia) y 3 años de precios ajustados por dividendos y splits (yfinance), con **fechas pinneadas y cache CSV en `data/`**: yfinance re-ajusta el histórico retroactivamente con cada dividendo, así que sin pin + cache dos ejecuciones nunca ven los mismos datos.
 2. **Screening por momentum**: filtra activos cuyo retorno compuesto creció estrictamente en períodos consecutivos. Este notebook usa el método anual (años naturales). La app de producción usa semestres móviles (3 bloques de 126 días de trading contados desde el final) para evitar el sesgo de comparar el año en curso parcial contra años completos.
 3. **Test de normalidad** (Jarque-Bera + Shapiro-Wilk) con skewness y curtosis en exceso por activo.
-4. **Monte Carlo vectorizado**: 100.000 carteras aleatorias con pesos uniformes sobre el símplex (Dirichlet, ver Metodología). Calcula Sharpe, Sortino, CVaR ↓ y CVaR ↑ para dos horizontes (63d y 252d).
-5. **Optimización exacta** (scipy SLSQP): encuentra analíticamente Min Volatilidad, Max Sharpe y Max Sortino.
+4. **Monte Carlo vectorizado**: 100.000 carteras aleatorias con pesos uniformes sobre el símplex (Dirichlet, ver Metodología), **horizon-invariant** — solo se calculan estadísticas diarias (`mu_d`, `sigma_d`, `dd_d`, CVaR ↓/↑) una única vez; escalar a un horizonte (63d, 252d o cualquier otro) es una transformación posterior sobre esas mismas 100.000 carteras, sin volver a simular. Por memoria, se aplica **reservoir sampling**: de las 100.000 solo se conserva una muestra aleatoria uniforme de 2.000.
+5. **Optimización exacta** (scipy SLSQP), también horizon-invariant: encuentra analíticamente Min Volatilidad, Max Sharpe y Max Sortino en escala diaria, con **8 arranques** por objetivo (multi-start) para evitar óptimos locales en Sharpe/Sortino, que no son convexos.
 
 ---
 
 ## Cómo ejecutar
 
 ```bash
-pip install -r requirements-notebook.txt
-jupyter lab "Inversión MonteCarlo.ipynb"
+pip install -r ../requirements-notebook.txt
+jupyter lab OjoAlTicker.ipynb
 ```
 
-Tiempo estimado: ~5–10 minutos (descarga de ~500 tickers + 2×100K simulaciones Monte Carlo).
+Tiempo estimado: ~5–10 minutos la primera vez (descarga de ~500 tickers + 2×100K simulaciones Monte Carlo). Las siguientes ejecuciones leen los precios del cache en `data/`.
 
 ---
 
@@ -72,8 +72,8 @@ Solo penaliza retornos **por debajo de Rf** (downside deviation). La volatilidad
 
 | Parámetro | Valor |
 |-----------|-------|
-| Universo | S&P 500 (~503 tickers, dinámico desde Wikipedia) |
-| Histórico | 3 años de retornos diarios |
+| Universo | S&P 500 (~503 tickers, composición actual desde Wikipedia) |
+| Histórico | 3 años de retornos diarios — fechas pinneadas + cache CSV (`data/`) para reproducibilidad |
 | Tipo de retorno | Simple `(Pt−Pt-1)/Pt-1` — linealmente agregable entre activos (`R_p = Σ wᵢRᵢ`, exacto) |
 | Anualización (retorno) | Geométrica: `(1+μ_d)^h − 1` — captura el efecto compounding, más precisa que `μ_d × h` para h > 20 |
 | Anualización (riesgo) | `σ_d × √h` — regla de la raíz del tiempo, asume retornos i.i.d. |
@@ -97,13 +97,13 @@ Tres puntos notables:
 - **Punto tangente con la CML** (Capital Market Line): cartera de Max Sharpe — combinación óptima de activo libre de riesgo + cartera de mercado.
 - **Max Sortino**: óptimo cuando se prioriza la protección frente a caídas extremas sobre la eficiencia total.
 
-El Monte Carlo visualiza la nube; scipy encuentra los puntos exactos mediante SLSQP. **Min Volatilidad** es convexo (mínimo global garantizado); **Max Sharpe** y **Max Sortino** no lo son, por lo que un único arranque puede caer en un óptimo local. En este notebook se usa un único arranque por simplicidad.
+El Monte Carlo visualiza la nube; scipy encuentra los puntos exactos mediante SLSQP. **Min Volatilidad** es convexo (mínimo global garantizado); **Max Sharpe** y **Max Sortino** no lo son, por lo que un único arranque puede caer en un óptimo local. Este notebook usa **8 arranques** por objetivo (pesos iguales + 7 carteras factibles aleatorias con el mismo muestreo afín-Dirichlet del Monte Carlo) y se queda con el mejor — igual que en producción.
 
 ---
 
 ## Ejemplo — Cartera de referencia
 
-> Datos del **17/06/2026** · `Rf = 3.63%` (T-Bill 3M) · 751 observaciones diarias · 498 activos con datos suficientes (de 503)
+> Datos hasta el **06/07/2026** (pinneados, cache en `data/close_sp500_2026-07-07.csv`) · `Rf = 3.67%` (T-Bill 3M) · 749 observaciones diarias · 497 activos con datos suficientes (de 503)
 
 **6 activos por diversificación sectorial:**
 
@@ -120,42 +120,44 @@ El Monte Carlo visualiza la nube; scipy encuentra los puntos exactos mediante SL
 
 | Par | ρ | Par | ρ |
 |-----|---|-----|---|
-| MSFT–AMZN | 0.53 | JPM–XOM | 0.22 |
-| JPM–AMZN | 0.33 | MSFT–JNJ | −0.15 |
+| MSFT–AMZN | 0.54 | JPM–XOM | 0.22 |
+| JPM–AMZN | 0.32 | MSFT–JNJ | −0.13 |
 | JNJ–NEE | 0.28 | MSFT–NEE | −0.04 |
 | MSFT–JPM | 0.24 | **media \|ρ\|** | **0.17** |
 
 ---
 
-### Resultados — optimización exacta scipy (SLSQP)
+### Resultados — optimización exacta scipy (SLSQP, multi-start)
+
+Con **n = 6** activos, el peso máximo dinámico es `max(20%, 2/6) = 33.3%` — no el 20% fijo de un universo más amplio. Los pesos óptimos son **horizon-invariant** (misma optimización en escala diaria); lo que cambia entre horizontes es solo el escalado de retorno/volatilidad.
 
 **Horizonte Trimestral (63d)** · `Rf₆₃ ≈ 0.90%`
 
 | Cartera | Retorno | Volatilidad | Sharpe |
 |---------|---------|-------------|--------|
-| Max Sharpe | **5.32%** | 6.48% | **0.683** |
-| Max Sortino | 5.31% | 6.47% | 0.683 |
-| Min Volatilidad | 4.52% | **6.04%** | 0.599 |
+| Max Sharpe | **6.40%** | 6.68% | **0.823** |
+| Max Sortino | 6.44% | 6.73% | 0.823 |
+| Min Volatilidad | 4.60% | **5.77%** | 0.640 |
 
-**Horizonte Anual (252d)** · `Rf = 3.63%`
+**Horizonte Anual (252d)** · `Rf = 3.67%`
 
 | Cartera | Retorno | Volatilidad | Sharpe |
 |---------|---------|-------------|--------|
-| Max Sharpe | **23.06%** | 12.97% | **1.498** |
-| Max Sortino | 23.02% | 12.95% | 1.497 |
-| Min Volatilidad | 19.36% | **12.09%** | 1.302 |
+| Max Sharpe | **28.18%** | 13.35% | **1.835** |
+| Max Sortino | 28.36% | 13.45% | 1.836 |
+| Min Volatilidad | 19.72% | **11.55%** | 1.390 |
 
-> CVaR diario cartera Max Sharpe → CVaR↓ **1.85%**, CVaR↑ **1.75%**. Max Sharpe y Max Sortino convergen (diferencia máxima 0.9pp en NEE) — distribución aproximadamente simétrica. Los Sharpe anuales (~1.5) **no son comparables** con los trimestrales (~0.68): el retorno compuesto crece super-linealmente con h mientras la volatilidad escala con √h.
+> CVaR diario cartera Max Sharpe → CVaR↓ **1.86%**, CVaR↑ **1.89%**. Max Sharpe y Max Sortino casi convergen (diferencia máxima 1.2pp, en NEE) — distribución aproximadamente simétrica. Los Sharpe anuales (~1.8) **no son comparables** con los trimestrales (~0.82): el retorno compuesto crece super-linealmente con h mientras la volatilidad escala con √h.
 
-**Distribución de pesos — Max Sharpe (ambos horizontes):**
+**Distribución de pesos — Max Sharpe (horizon-invariant, ambos horizontes):**
 
 ```
-JPM    20.0%  ████████████████████
-JNJ    20.0%  ████████████████████
-XOM    20.0%  ████████████████████
-AMZN   20.0%  ████████████████████
-NEE    12.7%  █████████████
-MSFT    7.3%  ███████
+JPM    33.3%  █████████████████████████████████
+JNJ    33.3%  █████████████████████████████████
+AMZN   16.5%  █████████████████
+XOM    11.6%  ████████████
+NEE     3.2%  ███
+MSFT    2.0%  ██
 ```
 
-La optimización satura en el máximo permitido (20%) los 4 activos con correlaciones más bajas. MSFT recibe el menor peso por ser la correlación más alta del grupo (0.53 con AMZN).
+La optimización satura en el máximo dinámico (33.3% con n=6) a JPM y JNJ, los dos activos con correlaciones más bajas o negativas frente al resto de la cesta. MSFT recibe el peso mínimo (2%) por ser el más correlacionado del grupo (ρ=0.54 con AMZN).

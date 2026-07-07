@@ -1,0 +1,4 @@
+# Caches locales de datos (yfinance pinneado + backtests) — regenerables
+MonteCarlo/data/
+tries/TimesFM/data/
+.claude/
